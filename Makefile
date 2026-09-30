@@ -1,8 +1,10 @@
 # DeerFlow - Unified Development Environment
 
-.PHONY: help config config-upgrade check check-agent-guidance install extension-install extension-upgrade extension-list extension-enable extension-disable extension-remove setup doctor support-bundle detect-thread-boundaries detect-blocking-io dev dev-daemon start start-daemon nginx stop up down prod-logs clean docker-init docker-start docker-stop docker-logs docker-logs-frontend docker-logs-gateway docker-logs-redis setup-sandbox
+.PHONY: help config config-upgrade check check-agent-guidance install extension-install extension-upgrade extension-list extension-enable extension-disable extension-remove setup doctor support-bundle detect-thread-boundaries detect-blocking-io dev dev-daemon start start-daemon nginx stop up down prod-logs clean docker-init docker-start docker-stop docker-logs docker-logs-frontend docker-logs-gateway docker-logs-redis setup-sandbox chatgpt-login chatgpt-status chatgpt-models
 
 BASH ?= bash
+UV_BIN ?= $(if $(wildcard $(HOME)/.local/bin/uv),$(HOME)/.local/bin/uv,uv)
+CHATGPT_LOGIN_ARGS ?=
 BACKEND_UV_RUN = cd backend && uv run
 
 # Detect OS for Windows compatibility
@@ -25,6 +27,9 @@ help:
 	@echo "DeerFlow Development Commands:"
 	@echo "  make setup           - Interactive setup wizard (recommended for new users)"
 	@echo "  make doctor          - Check configuration and system requirements"
+	@echo "  make chatgpt-login   - Connect this Gateway to a ChatGPT Plus/Pro account"
+	@echo "  make chatgpt-status  - Show the connected ChatGPT account"
+	@echo "  make chatgpt-models  - List models available to that account"
 	@echo "  make support-bundle  - Create a redacted issue summary, AI draft, and evidence bundle"
 	@echo "  make config          - Generate local config files (aborts if config already exists)"
 	@echo "  make config-upgrade  - Merge new fields from config.example.yaml into config.yaml"
@@ -178,6 +183,16 @@ clean: stop
 	@-rm -rf backend/.deer-flow 2>/dev/null || true
 	@-rm -rf logs/*.log 2>/dev/null || true
 	@echo "✓ Cleanup complete"
+
+# Connect the local Gateway to a ChatGPT plan using the official OAuth flow.
+chatgpt-login:
+	@cd backend && $(UV_BIN) run --no-project --with httpx --with "PyJWT[crypto]" python scripts/chatgpt_login.py login $(CHATGPT_LOGIN_ARGS)
+
+chatgpt-status:
+	@cd backend && $(UV_BIN) run --no-project --with httpx --with "PyJWT[crypto]" python scripts/chatgpt_login.py status
+
+chatgpt-models:
+	@cd backend && $(UV_BIN) run --no-project --with httpx --with "PyJWT[crypto]" python scripts/chatgpt_login.py models
 
 # ==========================================
 # Docker Development Commands

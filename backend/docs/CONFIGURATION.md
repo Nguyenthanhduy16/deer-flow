@@ -157,17 +157,17 @@ models:
 - DeepSeek (`langchain_deepseek:ChatDeepSeek`)
 - Xiaomi MiMo (`deerflow.models.patched_mimo:PatchedChatMiMo`)
 - Claude Code OAuth (`deerflow.models.claude_provider:ClaudeChatModel`)
-- Codex CLI (`deerflow.models.openai_codex_provider:CodexChatModel`)
+- ChatGPT Plus/Pro plan (`deerflow.models.openai_codex_provider:ChatGPTPlanChatModel`)
 - Any LangChain-compatible provider
 
-CLI-backed provider examples:
+Subscription-backed provider examples:
 
 ```yaml
 models:
-  - name: gpt-5.4
-    display_name: GPT-5.4 (Codex CLI)
-    use: deerflow.models.openai_codex_provider:CodexChatModel
-    model: gpt-5.4
+  - name: gpt-6-astra
+    display_name: GPT-6 Astra (ChatGPT plan)
+    use: deerflow.models.openai_codex_provider:ChatGPTPlanChatModel
+    model: gpt-6-astra
     supports_thinking: true
     supports_reasoning_effort: true
 
@@ -179,9 +179,10 @@ models:
     supports_thinking: true
 ```
 
-**Auth behavior for CLI-backed providers**:
-- `CodexChatModel` loads Codex CLI auth from `~/.codex/auth.json`
-- The Codex Responses endpoint currently rejects `max_tokens` and `max_output_tokens`, so `CodexChatModel` does not expose a request-level token cap
+**Auth behavior for subscription-backed providers**:
+- Run `make chatgpt-login` on the host, approve plan usage, then use `make chatgpt-models` to choose a model slug available to your account. Restart the Gateway after changing `config.yaml`.
+- `ChatGPTPlanChatModel` uses DeerFlow's own OAuth credential in `backend/.deer-flow/chatgpt-auth.json`, refreshes it automatically, and calls the public `/v1/responses` API with `store: false` and `stream: true`. It does not read Codex CLI auth. Set `DEER_FLOW_CHATGPT_AUTH_PATH` only if the Gateway and login command need another shared credential location.
+- The preview does not support `max_tokens` or `max_output_tokens` for plan usage. A Gateway has one ChatGPT account credential shared by its users; use a private Gateway for a personal plan. See [OpenAI's plan usage documentation](https://developers.openai.com/siwc/token-sharing-open-source/).
 - `ClaudeChatModel` accepts `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_AUTH_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR`, `CLAUDE_CODE_CREDENTIALS_PATH`, or plaintext `~/.claude/.credentials.json`
 - A `CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR` handoff is drained on first use and the token is kept for the life of the process, so every `ClaudeChatModel` instance reuses it
 - On macOS, DeerFlow does not probe Keychain automatically. Use `scripts/export_claude_code_oauth.py` to export Claude Code auth explicitly when needed

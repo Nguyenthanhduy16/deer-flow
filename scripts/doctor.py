@@ -456,6 +456,29 @@ def check_llm_auth(config_path: Path) -> list[CheckResult]:
             use = model.get("use", "")
             model_name = model.get("name", "default")
 
+            if use == "deerflow.models.openai_codex_provider:ChatGPTPlanChatModel":
+                runtime_home = Path(os.environ.get("DEER_FLOW_HOME", Path(__file__).resolve().parent.parent / "backend" / ".deer-flow"))
+                auth_path = Path(os.environ.get("DEER_FLOW_CHATGPT_AUTH_PATH", runtime_home / "chatgpt-auth.json")).expanduser()
+                try:
+                    auth = json.loads(auth_path.read_text(encoding="utf-8")) if auth_path.is_file() and not auth_path.is_symlink() else {}
+                except (OSError, ValueError):
+                    auth = {}
+                available = (
+                    isinstance(auth, dict)
+                    and all(isinstance(auth.get(key), str) and auth[key] for key in ("client_id", "subject", "access_token", "refresh_token", "ext_agent_host_id"))
+                    and auth.get("client_id") != "dynamic_agent_client"
+                    and isinstance(auth.get("scopes"), list)
+                    and "chatgpt.tokens.use.direct" in auth["scopes"]
+                    and isinstance(auth.get("saved_at"), (int, float))
+                    and isinstance(auth.get("expires_in"), (int, float))
+                )
+                results.append(CheckResult(
+                    f"ChatGPT plan auth available (model: {model_name})",
+                    "ok" if available else "fail",
+                    str(auth_path),
+                    fix=None if available else "Run `make chatgpt-login` on this host and approve plan usage",
+                ))
+
             if use == "deerflow.models.openai_codex_provider:CodexChatModel":
                 auth_path = Path(os.environ.get("CODEX_AUTH_PATH", "~/.codex/auth.json")).expanduser()
                 if _codex_auth_file_has_access_token(auth_path):

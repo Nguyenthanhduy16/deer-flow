@@ -23,6 +23,15 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, System
 from langchain_core.outputs import ChatGeneration, ChatResult
 
 from deerflow.models.credential_loader import CodexCliCredential, load_codex_cli_credential
+from deerflow.siwc_auth import (
+    RESPONSES_URL,
+)
+from deerflow.siwc_auth import (
+    get_access_token as get_siwc_access_token,
+)
+from deerflow.siwc_auth import (
+    load_credentials as load_siwc_credentials,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -268,7 +277,7 @@ class CodexChatModel(BaseChatModel):
         streamed_output_items: dict[int, dict[str, Any]] = {}
 
         with httpx.Client(timeout=300) as client:
-            with client.stream("POST", f"{CODEX_BASE_URL}/responses", headers=headers, json=payload) as resp:
+            with client.stream("POST", self._responses_url(), headers=headers, json=payload) as resp:
                 resp.raise_for_status()
                 for line in resp.iter_lines():
                     data = self._parse_sse_data_line(line)
@@ -283,6 +292,15 @@ class CodexChatModel(BaseChatModel):
                             streamed_output_items[output_index] = output_item
                     elif event_type == "response.completed":
                         completed_response = data["response"]
+                    elif event_type in ("response.failed", "error"):
+                        response = data.get("response")
+                        error = data.get("error") if event_type == "error" else (response.get("error") if isinstance(response, dict) else None)
+                        code = error.get("code") if isinstance(error, dict) else None
+                        if code == "subscription_sharing_usage_limit_exceeded":
+                            raise RuntimeError("ChatGPT plan usage limit reached. Try again after the limit resets or use an API key.")
+                        raise RuntimeError(f"Model response failed ({code or 'unknown_error'})")
+                    elif event_type == "response.incomplete":
+                        raise RuntimeError("Model response ended incomplete")
 
         if not completed_response:
             raise RuntimeError("Codex API stream ended without response.completed event")
@@ -309,6 +327,9 @@ class CodexChatModel(BaseChatModel):
 
         return completed_response
 
+    def _responses_url(self) -> str:
+        return f"{CODEX_BASE_URL}/responses"
+
     @staticmethod
     def _parse_sse_data_line(line: str) -> dict[str, Any] | None:
         """Parse a data line from the SSE stream, skipping terminal markers."""
@@ -322,7 +343,7 @@ class CodexChatModel(BaseChatModel):
         try:
             data = json.loads(raw_data)
         except json.JSONDecodeError:
-            logger.debug(f"Skipping non-JSON Codex SSE frame: {raw_data}")
+            logger.debug("Skipping non-JSON Responses SSE frame")
             return None
 
         return data if isinstance(data, dict) else None
@@ -475,3 +496,77 @@ class CodexChatModel(BaseChatModel):
                     formatted_tools.append(tool)
 
         return RunnableBinding(bound=self, kwargs={"tools": formatted_tools}, **kwargs)
+
+
+class ChatGPTPlanChatModel(CodexChatModel):
+    """Use an explicitly authorized ChatGPT plan on the public Responses API.
+
+    Credentials are issued to DeerFlow's own dynamic OAuth registration by
+    scripts/chatgpt_login.py. Codex CLI credentials are never reused here.
+    """
+
+    def model_post_init(self, __context: Any) -> None:
+        self._validate_retry_config()
+        load_siwc_credentials()
+        BaseChatModel.model_post_init(self, __context)
+
+    def _responses_url(self) -> str:
+        return RESPONSES_URL
+
+    def _convert_messages(self, messages: list[BaseMessage]) -> tuple[str, list[dict]]:
+        instructions, _ = super()._convert_messages(messages)
+        items: list[dict] = []
+        for message in messages:
+            if isinstance(message, AIMessage):
+                # Stateless Responses requires encrypted reasoning items from the
+                # prior response before its tool calls and their outputs.
+                reasoning_items = message.additional_kwargs.get("siwc_reasoning_items", [])
+                if isinstance(reasoning_items, list):
+                    items.extend(item for item in reasoning_items if isinstance(item, dict) and item.get("type") == "reasoning")
+            _, converted = super()._convert_messages([message])
+            for item in converted:
+                if item.get("type") == "function_call":
+                    item["namespace"] = "deerflow"
+            items.extend(converted)
+        return instructions, items
+
+    def _parse_response(self, response: dict) -> ChatResult:
+        result = super()._parse_response(response)
+        reasoning_items = [item for item in response.get("output", []) if isinstance(item, dict) and item.get("type") == "reasoning"]
+        if reasoning_items:
+            result.generations[0].message.additional_kwargs["siwc_reasoning_items"] = reasoning_items
+        return result
+
+    def _call_codex_api(self, messages: list[BaseMessage], tools: list[dict] | None = None) -> dict:
+        instructions, input_items = self._convert_messages(messages)
+        payload: dict[str, Any] = {
+            "model": self.model,
+            "instructions": instructions,
+            "input": input_items,
+            "store": False,
+            "stream": True,
+            "include": ["reasoning.encrypted_content"],
+            "reasoning": {"effort": self.reasoning_effort, "summary": "detailed"} if self.reasoning_effort != "none" else {"effort": "none"},
+        }
+        if tools:
+            payload["tools"] = [
+                {
+                    "type": "namespace",
+                    "name": "deerflow",
+                    "description": "Tools available to the DeerFlow agent",
+                    "tools": self._convert_tools(tools),
+                }
+            ]
+        headers = {
+            "Authorization": f"Bearer {get_siwc_access_token()}",
+            "Content-Type": "application/json",
+            "Accept": "text/event-stream",
+        }
+        for attempt in range(1, self.retry_max_attempts + 1):
+            try:
+                return self._stream_response(headers, payload)
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code not in (429, 500, 529) or attempt >= self.retry_max_attempts:
+                    raise
+                time.sleep(2 * (1 << (attempt - 1)))
+        raise RuntimeError("ChatGPT plan request exhausted its retries")

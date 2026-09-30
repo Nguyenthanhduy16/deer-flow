@@ -58,6 +58,13 @@ the same policy first so run metadata reports the effective values. Design note:
 `tests/test_reasoning_contract.py`, the contract section of
 `tests/test_model_factory.py`, `tests/test_models_router_reasoning.py`.
 
+### ChatGPT plan credentials and model (`../siwc_auth.py`, `openai_codex_provider.py`)
+
+- `ChatGPTPlanChatModel` is the official Sign in with ChatGPT path. The host-side `backend/scripts/chatgpt_login.py` runs with only `httpx` and `PyJWT[crypto]` in a standalone uv environment, and uses OAuth dynamic registration, PKCE, a loopback callback, and OIDC validation; the Gateway reads `runtime_home()/chatgpt-auth.json` or `DEER_FLOW_CHATGPT_AUTH_PATH`. It never loads Codex CLI auth.
+- Host login supports `--browser`, `--no-browser`, and `--timeout` through `CHATGPT_LOGIN_ARGS`; the default callback wait is 600 seconds. Keep the crypto extra: importing PyJWT alone does not prove RSA/EC signature verification works.
+- Refresh serializes on a file lock and atomically replaces the rotating token pair with owner-only permissions. Preserve the previous owner when a root Docker process refreshes a host-owned file.
+- Inference uses `POST https://api.openai.com/v1/responses` with `store: false`, `stream: true`, and namespace-wrapped tools. It replays encrypted reasoning items from prior turns because Responses is stateless in this mode. Keep `response.completed` and failure handling, including top-level SSE `error` events. Surface `subscription_sharing_usage_limit_exceeded` clearly; the model catalog is not remaining-quota evidence. The legacy `CodexChatModel` remains for existing configurations.
+
 ### Claude Code Credentials (`packages/harness/deerflow/models/credential_loader.py`)
 
 - `ClaudeChatModel.model_post_init` calls `load_claude_code_credential()` for every instance, and `create_chat_model` builds fresh instances per run (lead agent, title, summarization, subagents)

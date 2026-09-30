@@ -240,6 +240,25 @@ class TestCheckLLMApiKey:
 
 
 class TestCheckLLMAuth:
+    def test_chatgpt_plan_auth_check_requires_own_scoped_credential(self, tmp_path, monkeypatch):
+        cfg = tmp_path / "config.yaml"
+        cfg.write_text("config_version: 5\nmodels:\n  - name: plan\n    use: deerflow.models.openai_codex_provider:ChatGPTPlanChatModel\n    model: gpt-5.4\n")
+        auth_path = tmp_path / "chatgpt-auth.json"
+        monkeypatch.setenv("DEER_FLOW_CHATGPT_AUTH_PATH", str(auth_path))
+
+        results = doctor.check_llm_auth(cfg)
+        assert any(result.status == "fail" and "ChatGPT plan" in result.label for result in results)
+
+        auth = {"client_id": "oaiapp_test", "subject": "user", "access_token": "access", "refresh_token": "refresh", "ext_agent_host_id": "urn:uuid:host", "scopes": ["chatgpt.tokens.use.direct"]}
+        auth_path.write_text(json.dumps(auth), encoding="utf-8")
+        results = doctor.check_llm_auth(cfg)
+        assert any(result.status == "fail" and "ChatGPT plan" in result.label for result in results)
+
+        auth.update(saved_at=1, expires_in=3600)
+        auth_path.write_text(json.dumps(auth), encoding="utf-8")
+        results = doctor.check_llm_auth(cfg)
+        assert any(result.status == "ok" and "ChatGPT plan" in result.label for result in results)
+
     def test_codex_auth_file_missing_fails(self, tmp_path, monkeypatch):
         cfg = tmp_path / "config.yaml"
         cfg.write_text("config_version: 5\nmodels:\n  - name: codex\n    use: deerflow.models.openai_codex_provider:CodexChatModel\n    model: gpt-5.4\n")

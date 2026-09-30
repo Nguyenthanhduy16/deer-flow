@@ -46,12 +46,14 @@ class TestProviders:
             "openrouter",
             "vllm",
             "mindie",
-            "codex",
+            "chatgpt",
             "claude_code",
         }
         assert expected.issubset(providers)
 
         assert providers["openai_responses"].extra_config["use_responses_api"] is True
+        assert providers["chatgpt"].default_model == "gpt-6-astra"
+        assert providers["chatgpt"].use == "deerflow.models.openai_codex_provider:ChatGPTPlanChatModel"
         assert providers["gemini_openai_gateway"].use == "deerflow.models.patched_openai:PatchedChatOpenAI"
         assert providers["mimo"].use == "deerflow.models.patched_mimo:PatchedChatMiMo"
         assert providers["deepseek"].use == "deerflow.models.patched_deepseek:PatchedChatDeepSeek"

@@ -154,7 +154,7 @@ It is disabled by default; see the linked guide to enable it.
    only, and does not include `.env`, raw conversation messages, or user file
    contents.
 
-   > **Advanced / manual configuration**: If you prefer to edit `config.yaml` directly, run `make config` instead to copy the full template. Optional dependency auto-detection accepts UTF-8 configuration files with or without a byte-order mark (BOM). See `config.example.yaml` for the complete reference including CLI-backed providers (Codex CLI, Claude Code OAuth), OpenRouter, Responses API, subagent runtime caps such as `subagents.max_total_per_run`, and more.
+   > **Advanced / manual configuration**: If you prefer to edit `config.yaml` directly, run `make config` instead to copy the full template. Optional dependency auto-detection accepts UTF-8 configuration files with or without a byte-order mark (BOM). See `config.example.yaml` for the complete reference including ChatGPT plan access, Claude Code OAuth, OpenRouter, Responses API, subagent runtime caps such as `subagents.max_total_per_run`, and more.
 
    Optional per-model pricing must use one currency across all priced models.
    DeerFlow disables Console cost estimates when currencies are mixed rather
@@ -263,14 +263,18 @@ It is disabled by default; see the linked guide to enable it.
 
    For vLLM 0.19.0, use `deerflow.models.vllm_provider:VllmChatModel`. For Qwen-style reasoning models, DeerFlow toggles reasoning with `extra_body.chat_template_kwargs.enable_thinking` and preserves vLLM's non-standard `reasoning` field across multi-turn tool-call conversations. Legacy `thinking` configs are normalized automatically for backward compatibility. If the endpoint reports a cumulative usage snapshot on every streaming chunk, set `cumulative_stream_usage: true` so DeerFlow converts those snapshots into per-chunk deltas; the option is disabled by default and leaves usage unchanged when a stable completion id is unavailable. Reasoning models may also require the server to be started with `--reasoning-parser ...`. If your local vLLM deployment accepts any non-empty API key, you can still set `VLLM_API_KEY` to a placeholder value.
 
-   CLI-backed provider examples:
+   To use your ChatGPT Plus/Pro plan with DeerFlow, run `make chatgpt-login` on the host (it installs only its small OAuth dependencies) and approve plan usage in the browser. Then run `make chatgpt-models` to list models available to that account, set the desired `model:` slug in `config.yaml`, and restart the Gateway. The login stores a DeerFlow-specific credential at `backend/.deer-flow/chatgpt-auth.json` (owner-only permissions); Docker development and production mounts share this runtime directory. One Gateway credential is shared by users of that Gateway, so keep the Gateway private to your account. OAuth grants plan usage, not ChatGPT chat history or personal memory; DeerFlow continues to assemble context from its own threads, tools, and memory. Usage remains subject to your plan limits. The model catalog may still list a model after the shared plan allowance is exhausted; an inference request then reports that usage is limited until it resets.
+
+   If your default browser is ChatGPT's embedded browser and sign-in stalls on security verification, run `make chatgpt-login CHATGPT_LOGIN_ARGS="--browser firefox"` to open Firefox on the same computer. Alternatively use `CHATGPT_LOGIN_ARGS="--no-browser"` and copy the printed URL into Chrome or Firefox. Complete browser verification yourself and keep the terminal open; login waits 10 minutes by default (`--timeout 900` allows 15 minutes). After a timeout, start a fresh login and use its new URL. The standalone login environment includes `PyJWT[crypto]` for ID-token signature verification.
+
+   Subscription-backed provider examples:
 
    ```yaml
    models:
-     - name: gpt-5.4
-       display_name: GPT-5.4 (Codex CLI)
-       use: deerflow.models.openai_codex_provider:CodexChatModel
-       model: gpt-5.4
+     - name: gpt-6-astra
+       display_name: GPT-6 Astra (ChatGPT plan)
+       use: deerflow.models.openai_codex_provider:ChatGPTPlanChatModel
+       model: gpt-6-astra
        supports_thinking: true
        supports_reasoning_effort: true
 
@@ -282,7 +286,7 @@ It is disabled by default; see the linked guide to enable it.
        supports_thinking: true
    ```
 
-   - Codex CLI reads `~/.codex/auth.json`
+   - ChatGPT plan access uses the official Sign in with ChatGPT OAuth flow and public `/v1/responses` API with `store: false` and `stream: true`; it does not read Codex CLI credentials. See [OpenAI's guide](https://developers.openai.com/siwc/token-sharing-open-source/).
    - Claude Code accepts `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_AUTH_TOKEN`, `CLAUDE_CODE_CREDENTIALS_PATH`, or `~/.claude/.credentials.json`
    - ACP agent entries are separate from model providers — if you configure `acp_agents.codex`, point it at a Codex ACP adapter such as `npx -y @zed-industries/codex-acp`
    - MiniMax Code speaks ACP directly. Install and authenticate it, then add it as an ACP agent:
